@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Platform Game with Monster</title>
+  <style>
+    /* Basic styles for the game area and actors */
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+    }
+
+    #game {
+      position: relative;
+      width: 500px;
+      height: 400px;
+      background-color: #add8e6;
+      overflow: hidden;
+    }
+
+    .player, .monster {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+    }
+
+    .player {
+      background-color: blue;
+    }
+
+    .monster {
+      background-color: red;
+    }
+
+    .wall {
+      background-color: black;
+      position: absolute;
+      width: 100px;
+      height: 30px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game"></div>
+
+<script>
+  const scale = 30; // Scale factor to map game units to pixels
+
+  // State class to keep track of level, actors, and game status
+  class State {
+    constructor(level, actors, status) {
+      this.level = level;
+      this.actors = actors;
+      this.status = status;
+    }
+
+    // Update the game state based on time and player input
+    update(time) {
+      let newActors = this.actors.map(actor => actor.update(time, this));
+      return new State(this.level, newActors, this.status);
+    }
+  }
+
+  // Player class
+  class Player {
+    constructor(pos) {
+      this.pos = pos;
+      this.size = {x: 1, y: 1};
+      this.speed = {x: 0, y: 0};
+      this.gravity = 30;
+      this.jumpSpeed = -15;
+    }
+
+    // Update player's position
+    update(time, state) {
+      this.speed.y += time * this.gravity;
+      let newPos = {x: this.pos.x, y: this.pos.y + this.speed.y * time};
+      if (!state.level.touches(newPos, this.size, "wall")) {
+        this.pos = newPos;
+      } else {
+        this.speed.y = 0; // Stop falling when hitting the floor
+      }
+      return this;
+    }
+
+    // Jump when space is pressed
+    jump() {
+      if (this.speed.y === 0) this.speed.y = this.jumpSpeed;
+    }
+  }
+
+  // Monster class
+  class Monster {
+    constructor(pos, speed) {
+      this.pos = pos;
+      this.speed = speed;
+      this.size = {x: 1, y: 1};
+    }
+
+    // Update monster's position
+    update(time, state) {
+      let newPos = {x: this.pos.x + this.speed.x * time, y: this.pos.y};
+      if (!state.level.touches(newPos, this.size, "wall")) {
+        this.pos = newPos;
+      } else {
+        this.speed.x = -this.speed.x; // Bounce back when hitting walls
+      }
+      return this;
+    }
+
+    // Check if the player collides with the monster
+    collide(state) {
+      let player = state.actors.find(actor => actor instanceof Player);
+      if (player.pos.y + player.size.y < this.pos.y + 0.5) {
+        // Player jumps on the monster
+        return new State(state.level, state.actors.filter(a => a !== this), state.status);
+      } else {
+        // Player touches the monster from the side -> game over
+        return new State(state.level, state.actors, "lost");
+      }
+    }
+  }
+
+  // Level class with a simple wall
+  class Level {
+    constructor() {
+      this.grid = [
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["wall", "wall", "wall", "wall", "wall"],
+      ];
+    }
+
+    touches(pos, size, type) {
+      let xStart = Math.floor(pos.x);
+      let xEnd = Math.ceil(pos.x + size.x);
+      let yStart = Math.floor(pos.y);
+      let yEnd = Math.ceil(pos.y + size.y);
+
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          if (this.grid[y][x] === type) return true;
+        }
+      }
+      return false;
+    }
+  }
+
+  // Initialize game state and player controls
+  function initGame() {
+    const gameArea = document.getElementById('game');
+    
+    // Create initial game objects
+    let player = new Player({x: 1, y: 1});
+    let monster = new Monster({x: 3, y: 1}, {x: 2, y: 0});
+    let level = new Level();
+
+    let state = new State(level, [player, monster], "playing");
+
+    // Render actors on the screen
+    function drawState(state) {
+      gameArea.innerHTML = ''; // Clear previous frame
+
+      state.actors.forEach(actor => {
+        let actorElement = document.createElement('div');
+        actorElement.style.width = `${actor.size.x * scale}px`;
+        actorElement.style.height = `${actor.size.y * scale}px`;
+        actorElement.style.left = `${actor.pos.x * scale}px`;
+        actorElement.style.top = `${actor.pos.y * scale}px`;
+        
+        if (actor instanceof Player) actorElement.className = 'player';
+        if (actor instanceof Monster) actorElement.className = 'monster';
+        
+        gameArea.appendChild(actorElement);
+      });
+
+      // Draw a wall at the bottom
+      let wall = document.createElement('div');
+      wall.className = 'wall';
+      wall.style.left = '0px';
+      wall.style.top = '300px'; // Positioned as a floor
+      gameArea.appendChild(wall);
+    }
+
+    // Update game state and handle player input
+    function gameLoop(time) {
+      if (state.status === "lost") {
+        console.log("Game Over!");
+        return;
+      }
+      
+      // Update player jump
+      if (keys['Space']) player.jump();
+
+      // Update actors
+      state = state.update(time);
+      
+      // Check for collisions with the monster
+      state.actors.forEach(actor => {
+        if (actor instanceof Monster) {
+          state = actor.collide(state);
+        }
+      });
+
+      drawState(state); // Render the updated state
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Input handling for player jumps
+    let keys = {};
+    window.addEventListener('keydown', event => {
+      keys[event.code] = true;
+    });
+    window.addEventListener('keyup', event => {
+      keys[event.code] = false;
+    });
+
+    requestAnimationFrame(gameLoop); // Start the game loop
+  }
+
+  // Start the game when the page is loaded
+  window.onload = initGame;
+</script>
+
+</body>
+</html>
